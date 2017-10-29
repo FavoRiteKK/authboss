@@ -24,6 +24,13 @@ const (
 
 	tplConfirmHTML = "confirm_email.html.tpl"
 	tplConfirmText = "confirm_email.txt.tpl"
+
+	// for randomize confirm token (length 6)
+	TokenLength   = 6
+	letterBytes   = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	letterIdxBits = 6                    // 6 bits to represent a letter index
+	letterIdxMask = 1<<letterIdxBits - 1 // All 1-bits, as many as letterIdxBits
+	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
 )
 
 var (
@@ -42,6 +49,26 @@ type ConfirmStorer interface {
 
 func init() {
 	authboss.RegisterModule("confirm", &Confirm{})
+	rand.Seed(time.Now().UnixNano())
+}
+
+// generate random string
+func RandStringBytesMaskImpr(n int) string {
+	b := make([]byte, n)
+	// A rand.Int63() generates 63 random bits, enough for letterIdxMax letters!
+	for i, cache, remain := n-1, rand.Int63(), letterIdxMax; i >= 0; {
+		if remain == 0 {
+			cache, remain = rand.Int63(), letterIdxMax
+		}
+		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
+			b[i] = letterBytes[idx]
+			i--
+		}
+		cache >>= letterIdxBits
+		remain--
+	}
+
+	return string(b)
 }
 
 // Confirm module
@@ -113,13 +140,10 @@ func (c *Confirm) afterRegister(ctx *authboss.Context) error {
 		return errUserMissing
 	}
 
-	token := make([]byte, 32)
-	if _, err := rand.Read(token); err != nil {
-		return err
-	}
-	sum := md5.Sum(token)
+	// changes to generate 6-characters token
+	token := RandStringBytesMaskImpr(TokenLength)
 
-	ctx.User[StoreConfirmToken] = base64.StdEncoding.EncodeToString(sum[:])
+	ctx.User[StoreConfirmToken] = token
 
 	if err := ctx.SaveUser(); err != nil {
 		return err
@@ -130,7 +154,7 @@ func (c *Confirm) afterRegister(ctx *authboss.Context) error {
 		return err
 	}
 
-	goConfirmEmail(c, ctx, email, base64.URLEncoding.EncodeToString(token))
+	goConfirmEmail(c, ctx, email, token)
 
 	return nil
 }
@@ -166,17 +190,7 @@ func (c *Confirm) confirmHandler(ctx *authboss.Context, w http.ResponseWriter, r
 		return authboss.ClientDataErr{Name: FormValueConfirm}
 	}
 
-	toHash, err := base64.URLEncoding.DecodeString(token)
-	if err != nil {
-		return authboss.ErrAndRedirect{
-			Location: "/", Err: fmt.Errorf("confirm: token failed to decode %q => %v\n", token, err),
-		}
-	}
-
-	sum := md5.Sum(toHash)
-
-	dbTok := base64.StdEncoding.EncodeToString(sum[:])
-	user, err := ctx.Storer.(ConfirmStorer).ConfirmUser(dbTok)
+	user, err := ctx.Storer.(ConfirmStorer).ConfirmUser(token)
 	if err == authboss.ErrUserNotFound {
 		return authboss.ErrAndRedirect{Location: "/", Err: errors.New("confirm: token not found")}
 	} else if err != nil {
