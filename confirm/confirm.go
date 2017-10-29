@@ -2,17 +2,17 @@
 package confirm
 
 import (
-	"crypto/md5"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"path"
 
-	"gopkg.in/authboss.v1"
-	"gopkg.in/authboss.v1/internal/response"
+	"github.com/volatiletech/authboss"
+	"github.com/volatiletech/authboss/internal/response"
+	"strings"
+	"time"
 )
 
 // Storer and FormValue constants
@@ -143,7 +143,7 @@ func (c *Confirm) afterRegister(ctx *authboss.Context) error {
 	// changes to generate 6-characters token
 	token := RandStringBytesMaskImpr(TokenLength)
 
-	ctx.User[StoreConfirmToken] = token
+	ctx.User[StoreConfirmToken] = strings.ToUpper(token)
 
 	if err := ctx.SaveUser(); err != nil {
 		return err
@@ -190,7 +190,7 @@ func (c *Confirm) confirmHandler(ctx *authboss.Context, w http.ResponseWriter, r
 		return authboss.ClientDataErr{Name: FormValueConfirm}
 	}
 
-	user, err := ctx.Storer.(ConfirmStorer).ConfirmUser(token)
+	user, err := ctx.Storer.(ConfirmStorer).ConfirmUser(strings.ToUpper(token))
 	if err == authboss.ErrUserNotFound {
 		return authboss.ErrAndRedirect{Location: "/", Err: errors.New("confirm: token not found")}
 	} else if err != nil {
